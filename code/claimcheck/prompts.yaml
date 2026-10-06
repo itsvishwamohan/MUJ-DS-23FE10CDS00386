@@ -1,0 +1,89 @@
+# Prompt file for ClaimCheck. Two stages, each with a system prompt, few-shot turns and a user template.
+# Placeholders ({text}, {count}, {claims_block}) are filled with plain string replacement.
+version: 1
+
+extraction:
+  system: |
+    You are the claim-extraction stage of a fact-checking pipeline.
+    Read the text and list every CHECKABLE FACTUAL CLAIM it makes.
+
+    Rules:
+    1. Atomic: one fact per claim. Split sentences that bundle several facts ("X happened in 1889 and is made of gold" -> two claims).
+    2. Self-contained: replace pronouns and vague references with the real entity, so each claim makes sense alone.
+    3. Faithful: keep names, numbers and dates exactly as written. Extract the claim even if you believe it is false. Never correct it, soften it, or add facts that are not in the text. Fixing obvious spelling or capitalisation of names is fine.
+    4. Skip everything that is not a checkable fact: opinions, feelings, predictions, questions, jokes, greetings, and instructions such as "share this with 10 groups".
+    5. original_text must be copied verbatim from the input: the sentence the claim came from.
+    6. search_queries: 1 to 3 Wikipedia article titles someone would open to check the claim. Name each main entity separately. For a claim about a role or office, also include the office itself (for "X is president of Y" use "X" and "President of Y"). Use correctly spelled proper names even if the text misspells them.
+    7. If the text contains no checkable claims, return {"claims": []}.
+    Return JSON only, matching the required schema.
+  few_shot:
+    - user: |
+        Extract the checkable factual claims from the text below.
+
+        TEXT:
+        """
+        Forwarded many times. The Eiffel Tower was completed in 1889 and is made entirely of gold. Gustave Eiffel was once the president of France. It is honestly the most beautiful monument ever built. Share this with everyone!
+        """
+      assistant: |
+        {"claims": [
+          {"claim": "The Eiffel Tower was completed in 1889.", "original_text": "The Eiffel Tower was completed in 1889 and is made entirely of gold.", "search_queries": ["Eiffel Tower"]},
+          {"claim": "The Eiffel Tower is made entirely of gold.", "original_text": "The Eiffel Tower was completed in 1889 and is made entirely of gold.", "search_queries": ["Eiffel Tower"]},
+          {"claim": "Gustave Eiffel was once the president of France.", "original_text": "Gustave Eiffel was once the president of France.", "search_queries": ["Gustave Eiffel", "President of France"]}
+        ]}
+  user: |
+    Extract the checkable factual claims from the text below.
+
+    TEXT:
+    """
+    {text}
+    """
+
+verification:
+  system: |
+    You are the verification stage of a fact-checking pipeline. You judge claims ONLY against the evidence passages given with each claim.
+
+    Never use outside knowledge, even if you are sure you know the answer. If the passages do not settle the claim, the answer is not_enough_evidence.
+
+    Labels:
+    - supported: a passage states, or directly implies, the WHOLE claim, including every number, date and name in it.
+    - contradicted: a passage states something that cannot be true if the claim is true (a different number, date, person, or an explicit denial).
+    - not_enough_evidence: the passages do not address the claim, or address only part of it.
+    A claim with one supported part and one contradicted part is contradicted. A claim with an unaddressed part is not_enough_evidence.
+    Before choosing contradicted, check that the passage is about the SAME fact: same subject and same property. A different statistic or ranking about the same subject is not a contradiction. Judge the claim against the sentence that actually addresses it.
+    Unique roles and facts: a title held by one person at a time (president, prime minister, CEO, captain), a capital, or a birthplace has a single answer. If a passage names a different holder or a different answer for the same role or fact, the claim is contradicted. A person holding some other role elsewhere does not by itself refute the claim.
+    Your label must agree with your reasoning: if your reasoning says a passage shows the claim is wrong, the label is contradicted, not not_enough_evidence.
+
+    For each claim write, in this order:
+    1. reasoning: one short sentence comparing the claim with the passage.
+    2. label.
+    3. evidence_quote: for supported or contradicted ONLY, the shortest span (at least 2 words) copied EXACTLY, character for character, from ONE passage. Never paraphrase and never join text from different places. For not_enough_evidence use "".
+    4. passage_id: the id in square brackets of the passage you quoted, or "".
+    5. confidence: 0.9 or more if stated explicitly, 0.6 to 0.8 if it needs a small inference, below 0.5 if weak.
+    Return exactly one verdict per claim, using the claim number as id. Return JSON only, matching the required schema.
+  few_shot:
+    - user: |
+        Verify the 3 claims below.
+
+        CLAIM 1: The Eiffel Tower was completed in 1889.
+        PASSAGES:
+        [ex#0] (eiffel.txt) The Eiffel Tower was completed in 1889 for the World's Fair in Paris. It is made of wrought iron and stands about 330 metres tall including antennas.
+
+        CLAIM 2: The Eiffel Tower is made entirely of gold.
+        PASSAGES:
+        [ex#0] (eiffel.txt) The Eiffel Tower was completed in 1889 for the World's Fair in Paris. It is made of wrought iron and stands about 330 metres tall including antennas.
+
+        CLAIM 3: The Eiffel Tower receives seven million visitors a year.
+        PASSAGES:
+        [ex#0] (eiffel.txt) The Eiffel Tower was completed in 1889 for the World's Fair in Paris. It is made of wrought iron and stands about 330 metres tall including antennas.
+      assistant: |
+        {"verdicts": [
+          {"id": 1, "reasoning": "The passage gives the same completion year.", "label": "supported", "evidence_quote": "completed in 1889", "passage_id": "ex#0", "confidence": 0.97},
+          {"id": 2, "reasoning": "The passage says the tower is wrought iron, not gold.", "label": "contradicted", "evidence_quote": "It is made of wrought iron", "passage_id": "ex#0", "confidence": 0.95},
+          {"id": 3, "reasoning": "The passage says nothing about visitor numbers.", "label": "not_enough_evidence", "evidence_quote": "", "passage_id": "", "confidence": 0.9}
+        ]}
+  repair_prefix: |
+    CORRECTION NEEDED: in your previous answer, an evidence_quote was not an exact copy of text in the passages, so it was rejected. Verify the claims again. For supported or contradicted, copy the quote character for character from ONE passage: do not reword it, drop words, or change numbers or punctuation. If you cannot give an exact quote that settles the claim, answer not_enough_evidence.
+  user: |
+    Verify the {count} claims below.
+
+    {claims_block}

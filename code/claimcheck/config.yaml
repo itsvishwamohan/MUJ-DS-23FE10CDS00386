@@ -1,0 +1,56 @@
+# ClaimCheck configuration. Every tunable lives here; nothing is hardcoded in the code.
+# Env overrides: OLLAMA_HOST, OLLAMA_MODEL
+
+ollama:
+  host: http://localhost:11434
+  model: llama3.2            # any model you have pulled, e.g. llama3.1:8b, qwen2.5:7b, mistral
+  timeout_seconds: 300       # first call is slow while the model loads into memory
+  max_retries: 3             # network / 5xx retries with exponential backoff
+  retry_backoff_seconds: 2
+  keep_alive: 10m            # keep the model loaded between calls
+  seed: 42                   # reproducible sampling
+  json_repair_attempts: 1    # re-prompt this many times when the JSON is invalid
+
+cache:
+  enabled: true              # identical LLM calls are answered from disk
+  directory: .cache
+
+extraction:
+  temperature: 0.1
+  num_predict: 1024
+  chunk_chars: 3000          # long inputs are split on sentence boundaries
+  max_claims: 12
+  min_claim_words: 3
+
+retrieval:
+  evidence_dir: evidence
+  window_sentences: 2        # a passage = this many consecutive sentences
+  top_k: 4                   # passages handed to the verifier per claim
+  min_score: 0.05            # below this cosine score a claim gets no LLM call
+
+wikipedia:                   # live evidence, used together with the local notes
+  enabled: true              # needs internet; if unreachable the run falls back to local notes
+  language: en
+  pages_per_claim: 4         # pages used per claim (intro text); the best hit is read in full
+  results_per_query: 2       # hits kept for each search query proposed by the extractor
+  max_chars_top_page: 30000
+  timeout_seconds: 10
+
+verification:
+  temperature: 0.0
+  num_predict: 1536
+  batch_size: 4              # claims verified per LLM call
+  min_quote_words: 2         # shorter quotes are not accepted as evidence
+  quote_repair_attempts: 1   # re-ask once when a quote is not verbatim (0 = off)
+
+report:
+  reliable_threshold: 80     # % of decided claims supported -> "Mostly reliable"
+  mixed_threshold: 40
+
+app:
+  host: 127.0.0.1
+  port: 5000
+  max_input_chars: 8000
+
+files:
+  prompts: prompts.yaml

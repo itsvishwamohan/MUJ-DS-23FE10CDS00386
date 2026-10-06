@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClaimCheck</title>
+<style>
+:root{
+  --paper:#eef1f4; --surface:#fff; --ink:#16202a; --muted:#5b6773; --rule:#d3dae1;
+  --ok:#1d7a5f; --ok-tint:#bfe8d6; --bad:#b42a3c; --bad-tint:#f4c3ca; --nei:#7a6a2b; --nei-tint:#eadfa8;
+  --accent:#1f3a5f; --accent-ink:#fff;
+  --serif:Charter,"Bitstream Charter","Iowan Old Style",Georgia,serif;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#11171d; --surface:#192129; --ink:#e8edf1; --muted:#97a4b0; --rule:#2c3640;
+  --ok:#5fc7a1; --ok-tint:#1f4a3b; --bad:#f08c9a; --bad-tint:#5a2530; --nei:#d6c373; --nei-tint:#4a4222;
+  --accent:#9db8dd; --accent-ink:#0d151d;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 var(--sans)}
+header{padding:1.5rem clamp(1rem,4vw,3rem) .5rem;display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:baseline;justify-content:space-between}
+h1{font:600 1.9rem/1.1 var(--serif);margin:0;letter-spacing:-.01em}
+.tag{color:var(--muted);margin:.25rem 0 0;max-width:46ch}
+#status{font-size:.85rem;color:var(--muted);padding:.2rem .7rem;border:1px solid var(--rule);border-radius:99px}
+#status.ok{color:var(--ok);border-color:var(--ok)} #status.down{color:var(--bad);border-color:var(--bad)}
+main{display:grid;gap:1.5rem;padding:1rem clamp(1rem,4vw,3rem) 3rem;grid-template-columns:minmax(280px,380px) minmax(0,1fr);align-items:start}
+@media (max-width:860px){main{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:1.1rem}
+form{position:sticky;top:1rem}
+label{display:block;font-weight:600;font-size:.9rem;margin:0 0 .35rem}
+textarea,select{width:100%;font:inherit;color:inherit;background:var(--paper);border:1px solid var(--rule);border-radius:4px;padding:.6rem}
+textarea{min-height:15rem;resize:vertical;font-family:var(--serif);line-height:1.55}
+select{margin-bottom:.9rem}
+button{font:600 1rem var(--sans);background:var(--accent);color:var(--accent-ink);border:0;border-radius:4px;padding:.65rem 1.1rem;margin-top:.8rem;cursor:pointer}
+button:disabled{opacity:.55;cursor:progress}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+#msg{margin:.8rem 0 0;color:var(--muted);font-size:.9rem;min-height:1.3em}
+#msg.err{color:var(--bad)}
+.empty{color:var(--muted);padding:2rem 1rem;text-align:center}
+.summary h2{font:600 1.4rem var(--serif);margin:0 0 .2rem}
+.summary p{margin:.1rem 0;color:var(--muted);font-size:.92rem}
+.bar{display:flex;height:.7rem;border-radius:99px;overflow:hidden;background:var(--rule);margin:.9rem 0 .5rem}
+.bar i{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1.2rem;font-size:.88rem}
+.claim{margin-top:1rem;border-left:5px solid var(--rule);padding-left:1rem}
+.claim.supported{border-color:var(--ok)} .claim.contradicted{border-color:var(--bad)} .claim.not_enough_evidence{border-color:var(--nei)}
+.chip{font:600 .85rem var(--sans);display:inline-block}
+.supported .chip{color:var(--ok)} .contradicted .chip{color:var(--bad)} .not_enough_evidence .chip{color:var(--nei)}
+.conf{color:var(--muted);font-size:.85rem;margin-left:.6rem}
+.claim h3{font:500 1.15rem/1.4 var(--serif);margin:.2rem 0}
+.orig{color:var(--muted);font-size:.85rem;margin:0 0 .5rem}
+.passage{font:1rem/1.6 var(--serif);margin:.6rem 0 .2rem}
+.src{color:var(--muted);font-size:.82rem;margin:0 0 .5rem}
+mark{color:inherit;padding:.05em .15em;border-radius:2px}
+.supported mark{background:var(--ok-tint)} .contradicted mark{background:var(--bad-tint)} .not_enough_evidence mark{background:var(--nei-tint)}
+.why{font-size:.92rem;margin:.3rem 0}
+.note{font-size:.88rem;color:var(--nei);margin:.3rem 0}
+details{font-size:.88rem;color:var(--muted);margin-top:.4rem}
+details p{margin:.4rem 0}
+@media (prefers-reduced-motion:no-preference){.panel{transition:opacity .15s}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>ClaimCheck</h1>
+    <p class="tag">Paste a news item or forward. Each factual claim is checked against Wikipedia and the local evidence notes, and every verdict has to quote its source.</p>
+  </div>
+  <span id="status" role="status">Checking Ollama…</span>
+</header>
+<main>
+  <form class="panel" id="form">
+    <label for="sample">Try a sample</label>
+    <select id="sample"><option value="">Choose a sample…</option></select>
+    <label for="text">Text to check</label>
+    <textarea id="text" placeholder="Paste an article, a social media post or a WhatsApp forward"></textarea>
+    <button id="go" type="submit">Check claims</button>
+    <p id="msg" aria-live="polite"></p>
+  </form>
+  <section id="out" aria-live="polite"><div class="panel empty">Results appear here. The first run is slower while the local model loads.</div></section>
+</main>
+{% raw %}
+<script>
+const $ = s => document.querySelector(s);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+const LABELS = { supported: ["✓ Supported", "ok"], contradicted: ["✗ Contradicted", "bad"], not_enough_evidence: ["? Not enough evidence", "nei"] };
+
+function passageNode(text, quote) {
+  const p = el("p", "passage");
+  const i = quote ? text.toLowerCase().indexOf(quote.toLowerCase()) : -1;
+  if (i < 0) { p.textContent = text; return p; }
+  p.append(text.slice(0, i), el("mark", null, text.slice(i, i + quote.length)), text.slice(i + quote.length));
+  return p;
+}
+
+function claimNode(r) {
+  const card = el("article", "claim " + r.label);
+  const head = el("div");
+  head.append(el("span", "chip", LABELS[r.label][0]), el("span", "conf", "confidence " + r.confidence.toFixed(2)));
+  card.append(head, el("h3", null, r.claim));
+  if (r.original_text) card.append(el("p", "orig", "From your text: " + r.original_text));
+  if (r.search_queries && r.search_queries.length) card.append(el("p", "orig", "Wikipedia searched for: " + r.search_queries.join(" · ")));
+  const main = r.passages.find(p => p.id === r.passage_id);
+  if (main) {
+    const src = el("p", "src", "Source: ");
+    if (main.url && main.url.startsWith("https://")) { const a = el("a", null, main.source); a.href = main.url; a.target = "_blank"; a.rel = "noopener"; src.append(a); }
+    else src.append(main.source);
+    card.append(passageNode(main.text, r.evidence_quote), src);
+  }
+  if (r.reasoning) card.append(el("p", "why", r.reasoning));
+  if (r.note) card.append(el("p", "note", r.note));
+  const rest = r.passages.filter(p => p !== main);
+  if (rest.length) {
+    const d = el("details"); d.append(el("summary", null, `Other retrieved passages (${rest.length})`));
+    rest.forEach(p => d.append(el("p", null, `${p.source} (score ${p.score}): ${p.text}`)));
+    card.append(d);
+  }
+  return card;
+}
+
+function render(rep) {
+  const out = $("#out"); out.replaceChildren();
+  const s = rep.summary, box = el("div", "panel");
+  const sum = el("div", "summary");
+  if (!s.total_claims) { box.append(el("p", "empty", "No checkable factual claims were found in that text.")); out.append(box); return; }
+  const score = s.reliability_score == null ? "no decided claims" : `${s.reliability_score}/100 of decided claims supported`;
+  sum.append(el("h2", null, s.rating), el("p", null, score));
+  const bar = el("div", "bar"), legend = el("div", "legend");
+  for (const [k, [name, c]] of Object.entries(LABELS)) {
+    const n = s.counts[k], seg = el("i"); seg.style.cssText = `width:${100 * n / s.total_claims}%;background:var(--${c})`;
+    bar.append(seg); legend.append(el("span", null, `${name.slice(2)}: ${n}`));
+  }
+  sum.append(bar, legend, el("p", null, `${rep.stats.llm_calls} model calls (${rep.stats.cache_hits} cached), ${rep.stats.elapsed_seconds}s, model ${rep.model}`));
+  (rep.warnings || []).forEach(w => sum.append(el("p", "note", w)));
+  box.append(sum); rep.claims.forEach(r => box.append(claimNode(r))); out.append(box);
+}
+
+async function check(e) {
+  e.preventDefault();
+  const btn = $("#go"), msg = $("#msg"); msg.className = "";
+  btn.disabled = true; msg.textContent = "Extracting claims, retrieving evidence, verifying. This can take a minute on a local model.";
+  try {
+    const res = await fetch("/api/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: $("#text").value }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Request failed");
+    msg.textContent = ""; render(data);
+  } catch (err) { msg.className = "err"; msg.textContent = err.message; }
+  btn.disabled = false;
+}
+
+async function init() {
+  $("#form").addEventListener("submit", check);
+  try {
+    const h = await (await fetch("/api/health")).json(), s = $("#status");
+    s.textContent = h.ok ? `Ollama ready · ${h.model}` : "Ollama not ready"; s.className = h.ok ? "ok" : "down";
+    if (!h.ok) { $("#msg").className = "err"; $("#msg").textContent = h.error; }
+  } catch { $("#status").textContent = "Server unreachable"; $("#status").className = "down"; }
+  const samples = await (await fetch("/api/samples")).json(), sel = $("#sample");
+  samples.forEach((x, i) => { const o = el("option", null, x.name); o.value = i; sel.append(o); });
+  sel.addEventListener("change", () => { if (sel.value !== "") $("#text").value = samples[sel.value].text; });
+}
+init();
+</script>
+{% endraw %}
+</body>
+</html>
